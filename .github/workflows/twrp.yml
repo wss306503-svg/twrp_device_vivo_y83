@@ -113,6 +113,17 @@ jobs:
           echo "== Device tree files =="
           find device/vivo/y83 -maxdepth 2 -type f | sort
 
+      - name: Patch mkbootimg for --header_version compat
+        run: |
+          # old twrp mkbootimg rejects soong's `--header_version`; make argparse ignore it
+          SRC=$GITHUB_WORKSPACE/$BUILD_DIR
+          for f in system/tools/mkbootimg/mkbootimg.py out/host/linux-x86/bin/mkbootimg; do
+            if [ -f "$SRC/$f" ]; then
+              sed -i 's/parse_args()/parse_known_args()/' "$SRC/$f" || true
+              echo "patched: $f"
+            fi
+          done
+
       - name: Build recovery
         run: |
           cd $GITHUB_WORKSPACE/$BUILD_DIR
