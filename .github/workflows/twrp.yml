@@ -134,7 +134,24 @@ jobs:
           export SOONG_ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
           lunch "${{ github.event.inputs.lunch_flavor || 'omni_y83-eng' }}"
+          SRC=$GITHUB_WORKSPACE/$BUILD_DIR
+          # soong auto-injects `--header_version 0` but the twrp-8.1 host
+          # mkbootimg script rejects it. Build once, then patch the *generated*
+          # host mkbootimg and rebuild; ninja caches make the rerun quick.
+          set +e
           mka "${{ github.event.inputs.target || 'recoveryimage' }}" -j$(nproc)
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "== first build failed; patching mkbootimg and retrying =="
+            find "$SRC" \( -name 'mkbootimg' -o -name 'mkbootimg.py' \) -type f 2>/dev/null | while IFS= read -r b; do
+              sed -i 's/parse_args()/parse_known_args()/' "$b" 2>/dev/null && echo "patched: $b"
+            done
+            sed -i 's/parse_args()/parse_known_args()/' \
+              "$SRC/out/host/linux-x86/bin/mkbootimg" 2>/dev/null && echo "patched host bin"
+            mka "${{ github.event.inputs.target || 'recoveryimage' }}" -j$(nproc)
+            rc=$?
+          fi
+          exit $rc
 
       - name: Show build artifacts
         run: |
