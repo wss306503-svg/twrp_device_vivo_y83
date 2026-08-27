@@ -115,14 +115,14 @@ jobs:
 
       - name: Patch mkbootimg for --header_version compat
         run: |
-          # old twrp mkbootimg rejects soong's `--header_version`; make argparse ignore it
+          # old twrp mkbootimg rejects soong's `--header_version`; make argparse ignore it.
+          # Patch every mkbootimg python script in the tree (path differs per manifest).
           SRC=$GITHUB_WORKSPACE/$BUILD_DIR
-          for f in system/tools/mkbootimg/mkbootimg.py out/host/linux-x86/bin/mkbootimg; do
-            if [ -f "$SRC/$f" ]; then
-              sed -i 's/parse_args()/parse_known_args()/' "$SRC/$f" || true
-              echo "patched: $f"
-            fi
-          done
+          PATCHED=0
+          while IFS= read -r f; do
+            sed -i 's/parse_args()/parse_known_args()/' "$f" 2>/dev/null && echo "patched: $f" && PATCHED=1
+          done < <(find "$SRC" -name 'mkbootimg*.py' -type f 2>/dev/null)
+          echo "total_patched_files=$PATCHED"
 
       - name: Build recovery
         run: |
