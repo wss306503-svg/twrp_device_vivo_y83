@@ -106,6 +106,9 @@ jobs:
           cd $GITHUB_WORKSPACE/$BUILD_DIR
           export USE_CCACHE=1
           export CCACHE_DIR=$HOME/.ccache
+          # minimal-manifest-twrp: soong scans the whole framework tree, but
+          # the manifest only ships recovery-needed sources. Skip missing deps.
+          export SOONG_ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
           lunch "${{ github.event.inputs.lunch_flavor || 'omni_y83-eng' }}"
           mka "${{ github.event.inputs.target || 'recoveryimage' }}" -j$(nproc)
