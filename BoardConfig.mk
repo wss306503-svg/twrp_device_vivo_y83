@@ -103,8 +103,8 @@ endif
 TARGET_COPY_OUT_VENDOR := vendor
 BUILD_SEPOLINUX := true
 
-# VNDK
-BOARD_VNDK_VERSION := 27
+# VNDK - twrp-8.1 minimal manifest only supports "current"
+BOARD_VNDK_VERSION := current
 
 # Allow building with custom partition layout (MTK)
 TARGET_USE_SQUASHFS := false
