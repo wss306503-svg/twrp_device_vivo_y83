@@ -124,30 +124,43 @@ jobs:
           source build/envsetup.sh
           lunch "${{ github.event.inputs.lunch_flavor || 'omni_y83-eng' }}"
           SRC=$GITHUB_WORKSPACE/$BUILD_DIR
-          # soong auto-injects `--header_version 0` but the twrp-8.1 host
-          # mkbootimg script rejects it. Build once, then patch the *generated*
-          # host mkbootimg and rebuild; ninja caches make the rerun quick.
-          set +e
+          # Robust fix for soong's `--header_version 0`:
+          #   - soong's MkbootImage rule always passes `--header_version 0`,
+          #     but the twrp-8.1 host mkbootimg (Android 8.1 ArgumentParser)
+          #     does not define that flag and refuses it.
+          #   - header_version 0 == legacy boot header, so it is SAFE to drop.
+          #   - Fix: `parser.parse_args()` -> `parser.parse_known_args()[0]`
+          #     (parse_known_args ignores unknown flags; [0] keeps the
+          #     Namespace, since parse_known_args() itself returns a tuple).
+          #   - We patch BEFORE the first build, so ninja compiles/installs the
+          #     patched script once. Patching *after* a failure is unreliable
+          #     because ninja then re-copies the (already patched) file, and a
+          #     narrow sed pattern may silently match nothing while still
+          #     printing "patched" (sed exits 0 even with 0 substitutions).
+          echo "== Patching mkbootimg for soong --header_version =="
+          found=0
+          # generic match on `parse_args()` -> `parse_known_args()[0]`
+          for b in $(find "$SRC" \( -name 'mkbootimg' -o -name 'mkbootimg.py' \) -type f 2>/dev/null); do
+            sed -i 's/parse_args()/parse_known_args()[0]/g' "$b" 2>/dev/null
+            if grep -qs 'parse_known_args()\[0\]' "$b"; then
+              found=1
+              echo "VERIFY-OK: patched $b"
+            else
+              echo "VERIFY-WARN: no change in $b"
+            fi
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "ERROR: could not patch any mkbootimg; aborting"
+            exit 1
+          fi
           mka "${{ github.event.inputs.target || 'recoveryimage' }}" -j$(nproc)
           rc=$?
           if [ $rc -ne 0 ]; then
-            echo "== first build failed; patching mkbootimg and retrying =="
-            # soong passes --header_version but twrp-8.1 mkbootimg rejects it.
-            # 1) replace parse_args() -> parse_known_args()[0] (generic match,
-            #    as `= parser.parse_args()` may not match the real source)
-            # 2) [0] keeps a Namespace: parse_known_args() returns a tuple.
-            find "$SRC" \( -name 'mkbootimg' -o -name 'mkbootimg.py' \) -type f 2>/dev/null | while IFS= read -r b; do
-              sed -i 's/parse_args()/parse_known_args()[0]/g' "$b" 2>/dev/null && echo "patched: $b"
-            done
+            echo "== build failed; re-applying patch to generated host bin =="
+            # safety net: if the patched source got overwritten during sync of
+            # the host prebuilt, patch the installed binary directly.
             sed -i 's/parse_args()/parse_known_args()[0]/g' \
-              "$SRC/out/host/linux-x86/bin/mkbootimg" 2>/dev/null && echo "patched host bin"
-            # sanity: confirm the replacement actually took effect
-            if grep -q 'parse_known_args()\[0\]' "$SRC/system/core/mkbootimg/mkbootimg" 2>/dev/null; then
-              echo "VERIFY: mkbootimg source now uses parse_known_args()[0]"
-            else
-              echo "VERIFY-WARN: replacement not found in mkbootimg source; grep details below"
-              grep -n 'parse_args' "$SRC/system/core/mkbootimg/mkbootimg" 2>/dev/null | head -5
-            fi
+              "$SRC/out/host/linux-x86/bin/mkbootimg" 2>/dev/null || true
             mka "${{ github.event.inputs.target || 'recoveryimage' }}" -j$(nproc)
             rc=$?
           fi
