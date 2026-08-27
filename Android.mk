@@ -4,7 +4,7 @@
 #
 
 # Empty Android.mk - prebuilt kernel is referenced via TARGET_PREBUILT_KERNEL
-# and recovery root files via PRODUCT_COPY_FILES in omni_y83.mk
+# (set in BoardConfig.mk) and recoveryimage packing includes it automatically.
 LOCAL_PATH := $(call my-dir)
 
 ifeq ($(TARGET_PREBUILT_KERNEL),)
@@ -14,9 +14,4 @@ ifeq ($(TARGET_PREBUILT_KERNEL),)
             TARGET_PREBUILT_KERNEL := $(LOCAL_KERNEL)
         endif
     endif
-endif
-
-# Copy prebuilt kernel into out directory if present
-ifneq ($(TARGET_PREBUILT_KERNEL),)
-    PRODUCT_COPY_FILES += $(TARGET_PREBUILT_KERNEL):kernel
 endif
