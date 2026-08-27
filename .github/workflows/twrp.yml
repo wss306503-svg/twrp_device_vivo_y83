@@ -1,0 +1,129 @@
+name: Build TWRP for vivo Y83
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Build target'
+        required: true
+        default: 'recoveryimage'
+      lunch_flavor:
+        description: 'Lunch combo flavor'
+        required: true
+        default: 'omni_y83-eng'
+  push:
+    branches: [ main, master ]
+    paths:
+      - '**.mk'
+      - '**.fstab'
+      - 'prebuilt/**'
+      - 'root/**'
+      - '.github/workflows/twrp.yml'
+
+env:
+  MANIFEST_URL: 'https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git'
+  MANIFEST_BRANCH: 'twrp-8.1'
+  DEVICE_TREE_PATH: 'device/vivo/y83'
+  BUILD_DIR: 'twrp-src'
+
+jobs:
+  build:
+    name: Build recovery image
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout device tree (into workspace root)
+        uses: actions/checkout@v4
+        with:
+          path: device_tree_checkout
+          fetch-depth: 1
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '8'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            git ccache gnupg flex bison gperf build-essential \
+            zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
+            lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
+            libgl1-mesa-dev libxml2-utils xsltproc unzip python-is-python3 \
+            python3-pip repo
+          echo "== Tool versions =="
+          git --version
+          repo --version 2>&1 | head -1 || true
+          python3 --version
+          java -version 2>&1 | head -2
+
+      - name: Configure git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git config --global color.ui false
+
+      - name: Free disk space
+        run: |
+          echo "== Before =="
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup 2>/dev/null || true
+          sudo apt-get clean
+          echo "== After =="
+          df -h /
+
+      - name: Initialize TWRP minimal manifest
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/$BUILD_DIR
+          cd $GITHUB_WORKSPACE/$BUILD_DIR
+          repo init -u $MANIFEST_URL -b $MANIFEST_BRANCH --depth=1 --current-branch
+
+      - name: Sync source tree (shallow)
+        run: |
+          cd $GITHUB_WORKSPACE/$BUILD_DIR
+          repo sync -c -j$(nproc) --no-clone-bundle --no-tags --current-branch --force-sync
+
+      - name: Place device tree into build
+        run: |
+          cd $GITHUB_WORKSPACE/$BUILD_DIR
+          mkdir -p device/vivo
+          cp -r "$GITHUB_WORKSPACE/device_tree_checkout" "device/vivo/y83"
+          echo "== Device tree files =="
+          find device/vivo/y83 -maxdepth 2 -type f | sort
+
+      - name: Build recovery
+        run: |
+          cd $GITHUB_WORKSPACE/$BUILD_DIR
+          export USE_CCACHE=1
+          export CCACHE_DIR=$HOME/.ccache
+          source build/envsetup.sh
+          lunch "${{ github.event.inputs.lunch_flavor || 'omni_y83-eng' }}"
+          mka "${{ github.event.inputs.target || 'recoveryimage' }}" -j$(nproc)
+
+      - name: Show build artifacts
+        run: |
+          cd $GITHUB_WORKSPACE/$BUILD_DIR
+          echo "== Build output =="
+          ls -la out/target/product/y83/ || true
+          file out/target/product/y83/recovery.img || true
+
+      - name: Upload recovery.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: twrp_y83_recovery_${{ github.run_id }}
+          path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/out/target/product/y83/recovery.img
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: twrp_y83_buildlog_${{ github.run_id }}
+          path: |
+            ${{ github.workspace }}/${{ env.BUILD_DIR }}/out/error.log
+            ${{ github.workspace }}/${{ env.BUILD_DIR }}/out/*.log
+          if-no-files-found: ignore
+          retention-days: 7
