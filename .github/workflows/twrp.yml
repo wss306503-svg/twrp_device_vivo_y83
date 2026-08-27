@@ -133,13 +133,21 @@ jobs:
           if [ $rc -ne 0 ]; then
             echo "== first build failed; patching mkbootimg and retrying =="
             # soong passes --header_version but twrp-8.1 mkbootimg rejects it.
-            # Use parse_known_args()[0] to keep a namespace (parse_known_args()
-            # returns a tuple; taking [0] is required to avoid 'tuple' errors).
+            # 1) replace parse_args() -> parse_known_args()[0] (generic match,
+            #    as `= parser.parse_args()` may not match the real source)
+            # 2) [0] keeps a Namespace: parse_known_args() returns a tuple.
             find "$SRC" \( -name 'mkbootimg' -o -name 'mkbootimg.py' \) -type f 2>/dev/null | while IFS= read -r b; do
-              sed -i 's/= parser.parse_args()/= parser.parse_known_args()[0]/' "$b" 2>/dev/null && echo "patched: $b"
+              sed -i 's/parse_args()/parse_known_args()[0]/g' "$b" 2>/dev/null && echo "patched: $b"
             done
-            sed -i 's/= parser.parse_args()/= parser.parse_known_args()[0]/' \
+            sed -i 's/parse_args()/parse_known_args()[0]/g' \
               "$SRC/out/host/linux-x86/bin/mkbootimg" 2>/dev/null && echo "patched host bin"
+            # sanity: confirm the replacement actually took effect
+            if grep -q 'parse_known_args()\[0\]' "$SRC/system/core/mkbootimg/mkbootimg" 2>/dev/null; then
+              echo "VERIFY: mkbootimg source now uses parse_known_args()[0]"
+            else
+              echo "VERIFY-WARN: replacement not found in mkbootimg source; grep details below"
+              grep -n 'parse_args' "$SRC/system/core/mkbootimg/mkbootimg" 2>/dev/null | head -5
+            fi
             mka "${{ github.event.inputs.target || 'recoveryimage' }}" -j$(nproc)
             rc=$?
           fi
