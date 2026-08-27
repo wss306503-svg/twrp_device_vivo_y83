@@ -113,17 +113,6 @@ jobs:
           echo "== Device tree files =="
           find device/vivo/y83 -maxdepth 2 -type f | sort
 
-      - name: Patch mkbootimg for --header_version compat
-        run: |
-          # old twrp mkbootimg rejects soong's `--header_version`; make argparse ignore it.
-          # Patch every mkbootimg python script in the tree (path differs per manifest).
-          SRC=$GITHUB_WORKSPACE/$BUILD_DIR
-          PATCHED=0
-          while IFS= read -r f; do
-            sed -i 's/parse_args()/parse_known_args()/' "$f" 2>/dev/null && echo "patched: $f" && PATCHED=1
-          done < <(find "$SRC" -name 'mkbootimg*.py' -type f 2>/dev/null)
-          echo "total_patched_files=$PATCHED"
-
       - name: Build recovery
         run: |
           cd $GITHUB_WORKSPACE/$BUILD_DIR
@@ -143,10 +132,13 @@ jobs:
           rc=$?
           if [ $rc -ne 0 ]; then
             echo "== first build failed; patching mkbootimg and retrying =="
+            # soong passes --header_version but twrp-8.1 mkbootimg rejects it.
+            # Use parse_known_args()[0] to keep a namespace (parse_known_args()
+            # returns a tuple; taking [0] is required to avoid 'tuple' errors).
             find "$SRC" \( -name 'mkbootimg' -o -name 'mkbootimg.py' \) -type f 2>/dev/null | while IFS= read -r b; do
-              sed -i 's/parse_args()/parse_known_args()/' "$b" 2>/dev/null && echo "patched: $b"
+              sed -i 's/= parser.parse_args()/= parser.parse_known_args()[0]/' "$b" 2>/dev/null && echo "patched: $b"
             done
-            sed -i 's/parse_args()/parse_known_args()/' \
+            sed -i 's/= parser.parse_args()/= parser.parse_known_args()[0]/' \
               "$SRC/out/host/linux-x86/bin/mkbootimg" 2>/dev/null && echo "patched host bin"
             mka "${{ github.event.inputs.target || 'recoveryimage' }}" -j$(nproc)
             rc=$?
